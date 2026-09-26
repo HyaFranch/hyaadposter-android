@@ -1,0 +1,102 @@
+name: Build APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend (Vite)
+        run: npm run build
+
+      - name: Capacitor sync
+        run: ./node_modules/.bin/cap sync android
+
+      - name: Set Android SDK path
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "ERRO: secret KEYSTORE_BASE64 não foi encontrado! Configure-o em Settings > Secrets."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/hyaadposter-release.keystore
+
+      - name: Build APK (release, assinado)
+        env:
+          HYAADPOSTER_KEYSTORE_PATH: hyaadposter-release.keystore
+          HYAADPOSTER_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          HYAADPOSTER_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          HYAADPOSTER_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Prepare APK for release
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/app-release.apk
+
+      - name: Test RELEASE_TOKEN
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "ERRO: RELEASE_TOKEN não foi encontrado!"
+            exit 1
+          fi
+
+          echo "RELEASE_TOKEN encontrado."
+
+          curl -sS \
+            -H "Authorization: Bearer $RELEASE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }} \
+            | grep -E '"full_name"|"permissions"'
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: release/app-release.apk
+          name: HyaAdPoster ${{ github.ref_name }}
+          body: |
+            ## HyaAdPoster ${{ github.ref_name }}
+
+            Download the APK below and install on your Android.
+
+            > Allow "Install from unknown sources" for your file manager if it's your first time.
+          draft: false
+          prerelease: false

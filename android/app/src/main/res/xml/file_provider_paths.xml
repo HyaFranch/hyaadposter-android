@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  file_provider_paths.xml
+
+  Define quais diretórios o FileProvider pode compartilhar com outros apps
+  (no caso, o instalador do Android que vai receber o APK baixado).
+
+  Coloque em:
+  android/app/src/main/res/xml/file_provider_paths.xml
+
+  (Crie a pasta res/xml/ se não existir)
+
+  files-path = getFilesDir() do app — storage interno privado, sem permissão externa.
+  O APK é salvo lá pelo InstallerPlugin e compartilhado temporariamente com o instalador.
+-->
+<paths>
+    <files-path
+        name="internal_files"
+        path="." />
+</paths>
