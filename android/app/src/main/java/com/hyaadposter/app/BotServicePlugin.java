@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
-import android.os.PowerManager;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -15,10 +14,53 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "BotService")
 public class BotServicePlugin extends Plugin {
 
+    // Referência estática pra permitir que o BotForegroundService (rodando
+    // fora do ciclo de vida normal do plugin) emita eventos "botLog" e
+    // "botStatus" pro JS, mesmo com a WebView em segundo plano — o app
+    // ainda ouve, o listener só não é chamado se não houver instância viva
+    // (ex.: app foi realmente fechado, não só minimizado).
+    private static BotServicePlugin instance;
+    // Guarda o último status conhecido pra quando o app é reaberto com o
+    // service já rodando em background — sem isso a UI voltaria mostrando
+    // "idle" mesmo com o bot ativo, até o próximo evento chegar.
+    private static volatile String lastStatus = "idle";
+
+    @Override
+    public void load() {
+        instance = this;
+    }
+
+    public static void emitLog(String level, String text) {
+        if (instance == null) return;
+        JSObject data = new JSObject();
+        data.put("level", level);
+        data.put("text", text);
+        instance.notifyListeners("botLog", data);
+    }
+
+    public static void emitStatus(String status) {
+        lastStatus = status;
+        if (instance == null) return;
+        JSObject data = new JSObject();
+        data.put("status", status);
+        instance.notifyListeners("botStatus", data);
+    }
+
+    @PluginMethod
+    public void getStatus(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("status", lastStatus);
+        call.resolve(r);
+    }
+
     @PluginMethod
     public void startService(PluginCall call) {
         Context ctx = getContext();
         Intent intent = new Intent(ctx, BotForegroundService.class);
+        // call.getData() já é um JSObject (subclasse de JSONObject), então
+        // o .toString() gera um JSON válido com username/cookie/queue/etc,
+        // que o service lê pra rodar o loop de postagem nativamente.
+        intent.putExtra("payload", call.getData().toString());
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(ctx, intent);
@@ -37,7 +79,7 @@ public class BotServicePlugin extends Plugin {
 
     @PluginMethod
     public void isIgnoringBatteryOptimizations(PluginCall call) {
-        PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
         boolean ignoring = false;
         if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             ignoring = pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
