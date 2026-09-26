@@ -1,9 +1,12 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { loadConfig, saveConfig, protectCookie, unprotectCookieAsync } from '../utils/config'
-import { startBotService, stopBotService } from '../utils/backgroundService'
+import { startBotService, stopBotService, onBotLog, onBotStatus, getBotServiceStatus } from '../utils/backgroundService'
 import { BotRunner } from '../utils/botRunner'
+import { POST_INTERVAL_MS } from '../utils/api'
 
 const AppCtx = createContext(null)
+const isNative = Capacitor.isNativePlatform()
 
 export function AppProvider({ children }) {
 
@@ -28,6 +31,18 @@ export function AppProvider({ children }) {
   }, [])
 
   const clearLogs = useCallback(() => setLogs([]), [])
+
+  // No Android o loop de postagem roda inteiramente dentro do
+  // BotForegroundService nativo (mesmo com o app minimizado). Aqui só
+  // escutamos os eventos que ele emite pra manter a UI (logs/status)
+  // sincronizada quando o app estiver aberto.
+  useEffect(() => {
+    if (!isNative) return
+    getBotServiceStatus().then(setBotStatus)
+    const offLog    = onBotLog(({ level, text }) => addLog({ level, text }))
+    const offStatus = onBotStatus(({ status }) => setBotStatus(status))
+    return () => { offLog(); offStatus() }
+  }, [addLog])
 
   const activeAccount = cfg.accounts[cfg.active_account] ?? null
 
@@ -160,7 +175,6 @@ export function AppProvider({ children }) {
   }), [_mutateQueue])
 
   const startBot = useCallback(async ({ profileName }) => {
-    if (botRef.current?.isRunning) return
     const acc = cfg.accounts[cfg.active_account]
     if (!acc) return addLog({ level: 'error', text: 'No account selected.' })
 
@@ -175,6 +189,23 @@ export function AppProvider({ children }) {
     const queue = acc.profiles[profileName]?.queue ?? []
     if (!queue.length) return addLog({ level: 'error', text: 'Profile queue is empty.' })
 
+    if (isNative) {
+      // Loop roda inteiro no service nativo — sobrevive ao app minimizado.
+      if (botStatus === 'running') return
+      await startBotService({
+        username:       acc.username,
+        cookie:         cookiePlain,
+        profileName,
+        webhookUrl:     cfg.webhook_enabled ? cfg.webhook_url : null,
+        postIntervalMs: POST_INTERVAL_MS,
+        queue,
+      })
+      return
+    }
+
+    // Web / Electron: sem service nativo disponível, mantém o loop em JS
+    // (nessas plataformas o processo não é suspenso do mesmo jeito).
+    if (botRef.current?.isRunning) return
     await startBotService()
 
     const bot = new BotRunner({
@@ -193,7 +224,7 @@ export function AppProvider({ children }) {
     botRef.current = bot
     await bot.start()
     await stopBotService()
-  }, [cfg, addLog])
+  }, [cfg, addLog, botStatus])
 
   const stopBot = useCallback(async () => {
     setBotStatus('stopping')
