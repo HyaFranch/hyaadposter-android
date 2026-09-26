@@ -26,7 +26,7 @@ public class BotServicePlugin extends Plugin {
     private static volatile String lastStatus = "idle";
 
     @Override
-    protected void load() {
+    public void load() {
         instance = this;
     }
 
