@@ -2,7 +2,11 @@ import { CapacitorHttp } from '@capacitor/core'
 import { registerPlugin } from '@capacitor/core'
 
 const GITHUB_REPO    = 'HyaFranch/hyaadposter-android'
-const APP_VERSION    = 'v2.2.0'
+// Injetada pela CI a partir da tag git no momento do build (ex. tag
+// "v2.2.2" → VITE_APP_VERSION="2.2.2"). Em dev local, sem a env var, cai
+// no fallback abaixo — só ajuste esse fallback se rodar o updater fora
+// de um build de CI e precisar testar a comparação de versões.
+const APP_VERSION    = 'v' + (import.meta.env.VITE_APP_VERSION || '2.2.0')
 const APK_ASSET_NAME = 'app-release.apk'
 
 const RELEASES_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`

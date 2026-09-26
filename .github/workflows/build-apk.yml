@@ -31,7 +31,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build frontend (Vite)
+        env:
+          VITE_APP_VERSION: ${{ steps.version.outputs.name }}
         run: npm run build
 
       - name: Capacitor sync
@@ -61,7 +70,9 @@ jobs:
           HYAADPOSTER_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -PappVersionName=${{ steps.version.outputs.name }} \
+            -PappVersionCode=${{ github.run_number }}
 
       - name: Prepare APK for release
         run: |
